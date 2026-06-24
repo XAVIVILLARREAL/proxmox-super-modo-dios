@@ -10,6 +10,8 @@ const { exec, spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const compression = require('compression');
+const morgan = require('morgan');
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '8003', 10);
@@ -103,6 +105,10 @@ function auth(requiredRole = 'admin') {
     next();
   };
 }
+
+// ── Gzip + Request Logging ────────────────────────────────
+app.use(compression());
+app.use(morgan(':date[iso] :remote-addr :method :url :status :response-time[0]ms'));
 
 // ── CORS ───────────────────────────────────────────────────
 app.use((req, res, next) => {
@@ -318,15 +324,29 @@ app.get('/proxmox/resources', auth('admin'), (req, res) => {
     .then(result => res.json(result));
 });
 
+// ── Audit log ──────────────────────────────────────────────
+function auditLog(type, vmid, action, ip, role) {
+  const entry = {
+    timestamp: new Date().toISOString(),
+    type, vmid, action, ip, role
+  };
+  console.log(`[AUDIT] ${JSON.stringify(entry)}`);
+  fs.appendFile('/var/log/super-modo-dios-audit.log', 
+    JSON.stringify(entry) + '\n', 
+    () => {});
+}
+
 // ── PROXMOX: Start/Stop/Reboot VM ──────────────────────────
 app.post('/proxmox/vms/:vmid/:action', auth('admin'), (req, res) => {
   const vmid = parseInt(req.params.vmid, 10);
   const action = req.params.action;
   if (isNaN(vmid)) return res.status(400).json({ error: 'Invalid VMID' });
+  if (vmid < 100 || vmid > 999999) return res.status(400).json({ error: 'VMID out of range' });
   const allowedActions = ['start', 'stop', 'reboot', 'reset', 'shutdown', 'suspend', 'resume'];
   if (!allowedActions.includes(action)) {
     return res.status(400).json({ error: `Invalid action. Allowed: ${allowedActions.join(', ')}` });
   }
+  auditLog('vm', vmid, action, req.ip, req.authRole);
   console.log(`[PROXMOX:VM:${vmid}:${action.toUpperCase()}] ${req.ip}`);
   const cmd = action === 'stop' ? `qm shutdown ${vmid} 2>/dev/null || qm stop ${vmid}` : `qm ${action} ${vmid}`;
   enqueueCommand(() => runCommand(cmd, { role: req.authRole, timeout: 120000 }))
@@ -338,10 +358,12 @@ app.post('/proxmox/containers/:vmid/:action', auth('admin'), (req, res) => {
   const vmid = parseInt(req.params.vmid, 10);
   const action = req.params.action;
   if (isNaN(vmid)) return res.status(400).json({ error: 'Invalid VMID' });
+  if (vmid < 100 || vmid > 999999) return res.status(400).json({ error: 'VMID out of range' });
   const allowedActions = ['start', 'stop', 'restart', 'suspend', 'resume'];
   if (!allowedActions.includes(action)) {
     return res.status(400).json({ error: `Invalid action. Allowed: ${allowedActions.join(', ')}` });
   }
+  auditLog('ct', vmid, action, req.ip, req.authRole);
   console.log(`[PROXMOX:CT:${vmid}:${action.toUpperCase()}] ${req.ip}`);
   enqueueCommand(() => runCommand(`pct ${action} ${vmid}`, { role: req.authRole, timeout: 120000 }))
     .then(result => res.json(result));
@@ -401,10 +423,26 @@ server.on('upgrade', (request, socket, head) => {
   }
 });
 
+// ── Watchdog for systemd ──────────────────────────────────
+// Sends heartbeat via sd_notify every 15 seconds
+let watchdogInterval;
+try {
+  const sd_notify = require('sd_notify');
+  if (sd_notify && sd_notify.watchdogEnabled()) {
+    watchdogInterval = setInterval(() => {
+      sd_notify.watchdog();
+    }, 15000);
+    console.log('[WATCHDOG] systemd watchdog enabled (15s interval)');
+  }
+} catch(e) {
+  // sd_notify not available — watchdog disabled
+}
+
 // ── Start ──────────────────────────────────────────────────
 server.listen(PORT, '127.0.0.1', () => {
-  console.log(`🔱 SUPER MODO DIOS PROXMOX v4.0.0 — listening on http://127.0.0.1:${PORT}`);
+  console.log(`🔱 SUPER MODO DIOS PROXMOX v4.1.0 — listening on http://127.0.0.1:${PORT}`);
   console.log(`   Auth keys: ${API_KEYS_CONFIG.length} configured`);
   console.log(`   Max concurrent: ${MAX_CONCURRENT} | Timeout: ${CMD_TIMEOUT}ms | Rate limit: ${RATE_LIMIT}/min`);
   console.log(`   Endpoints: /health /metrics /shell/exec /proxmox/* /ws/exec`);
+  console.log(`   Features: gzip, morgan logging, audit log, watchdog`);
 });
