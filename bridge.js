@@ -10,8 +10,11 @@ const { exec, spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const compression = require('compression');
-const morgan = require('morgan');
+
+// Optional modules — bridge works without them
+let compression, morgan;
+try { compression = require('compression'); } catch(e) { compression = null; }
+try { morgan = require('morgan'); } catch(e) { morgan = null; }
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '8003', 10);
