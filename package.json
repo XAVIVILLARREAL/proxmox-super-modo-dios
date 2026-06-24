@@ -1,0 +1,13 @@
+{
+  "name": "super-modo-dios-proxmox",
+  "version": "4.0.0",
+  "description": "Super Modo Dios Proxmox Bridge — Control total del hypervisor vía HTTP + WebSocket",
+  "main": "super-modo-dios-bridge.js",
+  "scripts": {
+    "start": "node super-modo-dios-bridge.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "ws": "^8.16.0"
+  }
+}
