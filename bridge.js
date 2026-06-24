@@ -109,9 +109,9 @@ function auth(requiredRole = 'admin') {
   };
 }
 
-// ── Gzip + Request Logging ────────────────────────────────
-app.use(compression());
-app.use(morgan(':date[iso] :remote-addr :method :url :status :response-time[0]ms'));
+// ── Gzip + Request Logging (optional) ─────────────────────
+if (compression) app.use(compression());
+if (morgan) app.use(morgan(':date[iso] :remote-addr :method :url :status :response-time[0]ms'));
 
 // ── CORS ───────────────────────────────────────────────────
 app.use((req, res, next) => {
